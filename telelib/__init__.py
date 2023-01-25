@@ -1,4 +1,5 @@
 import os
+import io
 if os.path.exists('VERSION'):
     __VERSION__ = open('VERSION').read().strip()
 else:
@@ -127,18 +128,26 @@ class Logger:
 
 class Telegram:
     class RequestData:
-        def __init__(self, params, files={}):
-            self.multipart_data = files
+        def __init__(self, params):
             self.json_parameters = params
+            self.multipart_data = {}
+            self.data_parameters = {}
+
             for key, value in self.json_parameters.copy().items():
                 if value is None:
+                    del self.json_parameters[key]
+                elif isinstance(value, (int, str, bool)):
+                    self.data_parameters[key] = value
+                    del self.json_parameters[key]
+                elif isinstance(value, io.BufferedReader):
+                    self.multipart_data[key] = value
                     del self.json_parameters[key]
             for key, value in self.multipart_data.copy().items():
                 if value is None:
                     del self.multipart_data[key]
 
         def __repr__(self) -> str:
-            return f"{self.multipart_data}, {self.json_parameters}"
+            return f"{self.multipart_data}, {self.json_parameters}, {self.data_parameters}"
 
     USER_AGENT = "TelegramBotAPI/1.0"
     update_types = [
@@ -232,7 +241,10 @@ class Telegram:
             raise RuntimeError("Client is Closed.")
 
         files = request_data.multipart_data if request_data else None
-        data = request_data.json_parameters if request_data else None
+        json_ = request_data.json_parameters if request_data else None
+        data = request_data.data_parameters if request_data else None
+
+        Logger.get_logger().debug("Request: %s", request_data)
 
         try:
             res = await cls.client.request(
@@ -241,7 +253,8 @@ class Telegram:
                 headers={"User-Agent": cls.USER_AGENT},
                 timeout=cls.client_args['timeout'],
                 files=files,
-                json=data
+                json=json_,
+                params=data
             )
         except httpx.TimeoutException as err:
             if isinstance(err, httpx.PoolTimeout):
@@ -250,6 +263,7 @@ class Telegram:
         except httpx.HTTPError as err:
             raise Exception(f"httpx HTTPError: {err}")
 
+        Logger.get_logger().debug("Response: %s", res.content)
         return res.status_code, (json.loads(res.content))
 
     @classmethod
